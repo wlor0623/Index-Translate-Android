@@ -94,16 +94,21 @@ Java_com_index_translate_LlamaEngine_nativeLoadModel(
     LOGI("loading model: %s (ctx=%d threads=%d batch=%d)", path, nCtx, nThreads, nBatch);
 
     llama_model_params mparams = llama_model_default_params();
-    // n_gpu_layers 在 CPU-only 构建下无意义,保持默认
+    // 模型在 FUSE(/sdcard/Android/data)上,mmap 逐页换入会持续推高 RSS,
+    // 触发厂商 ROM lowmemorykiller 直接杀进程(桌面版 -lm none 同款问题的 Android 版)。
+    // 纯顺序读一次性落到匿名内存,峰值行为可预测。
+    mparams.load_mode = LLAMA_LOAD_MODE_NONE;
     llama_model * model = llama_model_load_from_file(path, mparams);
     env->ReleaseStringUTFChars(jPath, path);
     if (!model) {
         LOGE("llama_model_load_from_file failed");
         return 0;
     }
+    LOGI("model weights loaded");
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = (uint32_t) nCtx;
+    // 小批量降低混合 SSM 架构预填时的计算缓冲峰值(qwen35 的 SSM 中间量随批量线性涨)
     cparams.n_batch = (uint32_t) nBatch;
     cparams.n_ubatch = (uint32_t) nBatch;
     cparams.n_threads = nThreads;
@@ -114,6 +119,7 @@ Java_com_index_translate_LlamaEngine_nativeLoadModel(
         llama_model_free(model);
         return 0;
     }
+    LOGI("context created (n_batch=%u)", cparams.n_batch);
 
     auto * h = new IdxHandle();
     h->model = model;

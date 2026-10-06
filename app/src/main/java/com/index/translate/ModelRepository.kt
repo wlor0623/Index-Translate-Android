@@ -82,10 +82,17 @@ class ModelRepository(
     init {
         modelsDir.mkdirs()
         refresh()
-        // 启动即加载已选模型
+        // 启动即加载已选模型;连续失败过(疑似被系统杀)则不再自动加载,等用户手动点
         val sel = settings.selectedModel
         if (sel != null && _models.value.any { it.name == sel }) {
-            loadModel(sel)
+            if (settings.loadAttempts >= 2) {
+                _state.value = ModelState.Failed(
+                    sel,
+                    "上次加载未能完成(可能内存不足)。已跳过自动加载,点击模型重试(建议先清理后台应用)",
+                )
+            } else {
+                loadModel(sel)
+            }
         }
     }
 
@@ -129,6 +136,22 @@ class ModelRepository(
             else -> {}
         }
 
+        // 可用内存预检:模型本体 + 计算/上下文缓冲余量,不足时给提示而不是硬崩
+        val need = file.length() + EXTRA_MEM_BYTES
+        val avail = availMemBytes()
+        if (avail in 1 until need) {
+            android.util.Log.w(
+                TAG,
+                "memory check failed: need=${"%.2f".format(need / 1e9)}GB avail=${"%.2f".format(avail / 1e9)}GB",
+            )
+            _state.value = ModelState.Failed(
+                name,
+                "可用内存不足:约需 %.1f GB,当前仅 %.1f GB。请清理后台应用,或改小「设置→上下文长度」后重试"
+                    .format(need / 1e9, avail / 1e9),
+            )
+            return
+        }
+
         loadJob?.cancel()
         loadJob = scope.launch {
             // 先释放旧句柄(可能正在生成,先停)
@@ -139,19 +162,36 @@ class ModelRepository(
             withContext(Dispatchers.IO) { LlamaEngine.freeModel(old) }
             currentHandle = 0
 
+            settings.loadAttempts += 1 // 原生加载被系统强杀时进程内无从善后,先记数
             _state.value = ModelState.Loading(name)
             val nThreads = settings.autoThreads()
             val nCtx = settings.ctxTokens
+            android.util.Log.i(TAG, "loading $name (ctx=$nCtx threads=$nThreads)")
             val t0 = System.currentTimeMillis()
-            val ptr = LlamaEngine.loadModel(file.absolutePath, nCtx, nThreads)
+            // nBatch=256:压低混合 SSM 预填计算缓冲峰值
+            val ptr = LlamaEngine.loadModel(file.absolutePath, nCtx, nThreads, nBatch = 256)
             val ms = System.currentTimeMillis() - t0
-            _state.value = if (ptr != 0L) {
+            if (ptr != 0L) {
+                settings.loadAttempts = 0
                 currentHandle = ptr
-                ModelState.Ready(name, ptr, LlamaEngine.nCtx(ptr), ms)
+                android.util.Log.i(TAG, "model ready in ${ms}ms")
+                _state.value = ModelState.Ready(name, ptr, LlamaEngine.nCtx(ptr), ms)
             } else {
-                ModelState.Failed(name, "模型加载失败(内存不足或文件损坏),可尝试调小上下文长度")
+                android.util.Log.e(TAG, "model load returned null")
+                _state.value = ModelState.Failed(
+                    name,
+                    "模型加载失败(内存不足或文件损坏);可尝试清理后台应用、改小上下文,或重新下载",
+                )
             }
         }
+    }
+
+    /** 当前可用内存(不含 cached 低水位保守值) */
+    private fun availMemBytes(): Long {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        return mi.availMem
     }
 
     fun unload() {
@@ -363,6 +403,11 @@ class ModelRepository(
     }
 
     companion object {
+        private const val TAG = "ModelRepository"
+
+        /** 模型权重之外的计算/上下文缓冲余量(qwen35 混合 SSM @ubatch256 实测量级) */
+        private const val EXTRA_MEM_BYTES = 1_200_000_000L
+
         val REMOTE_MODELS = listOf(
             RemoteModel(
                 "Index-Translate-2B.Q4_K_M.gguf",
