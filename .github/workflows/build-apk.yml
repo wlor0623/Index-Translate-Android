@@ -24,12 +24,12 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      # 与 app/build.gradle.kts 中 ndkVersion / cmake version 严格一致
+      # ubuntu-latest 自带完整 Android SDK(license 已预接受),无需 setup-android;
+      # 只需补齐与 app/build.gradle.kts 一致的 NDK / CMake 版本
       - name: Install NDK and CMake
-        run: sdkmanager --install "ndk;27.2.12479018" "cmake;3.31.6"
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" "cmake;3.31.6"
 
       - name: Build (unit tests + debug APK)
         run: |
