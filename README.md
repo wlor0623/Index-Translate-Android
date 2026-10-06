@@ -51,6 +51,18 @@ https://modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/In
 
 ## 构建
 
+### GitHub Actions(推荐,无需本地环境)
+
+推送即自动构建:`.github/workflows/build-apk.yml` 在 ubuntu-latest 上跑单测 + 打 debug APK,产物在 Actions 的 Artifacts 下载(`Index-Translate-debug-apk`)。
+
+推送 `v*` 标签会自动创建 GitHub Release 并附上 APK,手机浏览器可直接下载安装:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+### 本地构建
+
 ```bash
 # 本机构建需要:JDK 17 + Android SDK(Platform 34、Build-Tools 34.0.0)
 # NDK r27c 与 CMake 3.31.6(AGP 会经 sdkmanager 自动安装,或手动:)
@@ -60,7 +72,7 @@ gradlew assembleDebug          # APK
 gradlew testDebugUnitTest      # TranslationCore 与桌面版 Python 的对拍测试
 ```
 
-国内网络下依赖走 Aliyun 镜像、Gradle 发行包走腾讯镜像(settings.gradle.kts / gradle-wrapper.properties 已配置)。
+国内网络下依赖走 Aliyun 镜像、Gradle 发行包走腾讯镜像(settings.gradle.kts / gradle-wrapper.properties 已配置);CI 上同样兼容(镜像不可达时自动回落 google/mavenCentral)。
 
 ## 目录
 
