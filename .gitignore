@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local config
+local.properties
+
+# Native build output
+*.so.txt
+
+# Vendored llama.cpp build artifacts (source itself is tracked)
+app/src/main/cpp/llama.cpp/build*/
